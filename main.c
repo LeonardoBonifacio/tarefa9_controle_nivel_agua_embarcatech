@@ -34,8 +34,8 @@
 
 // OBS: Na hora da montagem do reservatório precisamos ver até onde o potênciometro irá girar no nível mínimo  e máximo para ajustar os valores abaixo
 // Definições para o potenciômetro de boia
-#define ADC_MIN_POTENTIOMETER_READING 22   // Valor mínimo lido do potenciômetro (quando o reservatório está vazio)
-#define ADC_MAX_POTENTIOMETER_READING 4070 // Valor máximo lido do potenciômetro (quando o reservatório está cheio)
+#define ADC_MIN_POTENTIOMETER_READING 1990   // Valor mínimo lido do potenciômetro (quando o reservatório está vazio)
+#define ADC_MAX_POTENTIOMETER_READING  2240   // Valor máximo lido do potenciômetro (quando o reservatório está cheio)
 
 // Fila para armazenar os valores de nivel de agua lidos
 QueueHandle_t xQueueWaterLevelReadings;
@@ -68,6 +68,9 @@ volatile static int min_water_level_limit = 20; // Limite mínimo do nível de �
 volatile static int max_water_level_limit = 50; // Limite máximo do nível de água (em porcentagem)
 volatile static bool reset_limits=false;
 float ultrasonic_distance = 0.0f; // Variável para armazenar a distância medida pelo sensor ultrassônico
+bool estado_bomba = false; // Variável para armazenar o estado da bomba (ligada/desligada)
+bool envia_sinal = false; // Variável para controlar o envio do sinal de acionamento da bomba
+
 int main()
 {
     stdio_init_all();
@@ -187,6 +190,7 @@ void vReadPotentiometerTask(void *pvParameters){
         // 0% == 22 lido pelo adc
         // 100% == 4077
         adc_select_input(2); // GPIO 26 = ADC0
+        printf("Leitura do potenciômetro: %d\n", adc_read()); // Lê o valor do potenciômetro
         water_level_percentage = (((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
         xQueueSend(xQueueWaterLevelReadings, &water_level_percentage, 0); // Envia o valor da leitura do potenciometro em porcentagem para fila
         vTaskDelay(pdMS_TO_TICKS(100));              // 10 Hz de leitura
@@ -203,17 +207,41 @@ void vControlWaterPumpTask(void * pvParameters){
     int water_level_percentage = 0;
     xSemaphoreTake(xWifiReadySemaphore, portMAX_DELAY);
     xSemaphoreGive(xWifiReadySemaphore); // Dá o semáforo de volta para que outras tasks também possam usá-lo
+
+    uint64_t last_time_bomba = -20000; // Variável para armazenar o último tempo que a bomba foi ligada
     while (true){
         if (xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
             if (water_level_percentage <= min_water_level_limit){
-                gpio_put(RELE_PIN,0); // Ativa o rele deixando os 12v passarem para a bomba
+                //gpio_put(RELE_PIN,0); // Ativa o rele deixando os 12v passarem para a bomba
+                estado_bomba = true; // Estado da bomba ligado
             }
             else if (water_level_percentage >= max_water_level_limit){
-                gpio_put(RELE_PIN,1); // Desativa o rele desligando a bomba
-
+                //gpio_put(RELE_PIN,0); // Ativa o rele desligando a bomba
+                estado_bomba = false; // Estado da bomba desligado
             }
-
         }
+
+        if (estado_bomba && to_ms_since_boot(get_absolute_time()) - last_time_bomba > 20000) {
+            gpio_put(RELE_PIN, 0); // Liga a bomba (ativa o relé)
+            vTaskDelay(pdMS_TO_TICKS(200));
+            gpio_put(RELE_PIN, 1); // Desliga a bomba (desativa o relé)
+            last_time_bomba = to_ms_since_boot(get_absolute_time()); // Atualiza o último
+            envia_sinal = true;
+            printf("Bomba ligada!\n");
+        } else if (!estado_bomba && envia_sinal) {
+            gpio_put(RELE_PIN, 0); // Liga a bomba (ativa o relé)
+            vTaskDelay(pdMS_TO_TICKS(200));
+            gpio_put(RELE_PIN, 1); // Desliga a bomba (desativa o relé)
+            envia_sinal = false; // Não envia sinal, pois a bomba não está ligada
+            last_time_bomba = -20000;
+            printf("Bomba desligada!\n");
+        }
+
+        printf("Last time bomba: %llu\n", last_time_bomba);
+        printf("Estado da bomba: %s\n", estado_bomba ? "ON" : "OFF");
+        printf("Envia sinal: %s\n", envia_sinal ? "SIM" : "NAO");
+
+
 
         if (!gpio_get(RELE_PIN) && gpio_get(RED_LED_PIN)){
             set_led_green();
@@ -255,7 +283,7 @@ void vDisplayTask(void *pvParameters){
                 ssd1306_draw_string(&ssd, " DE AGUA", 20, 16);  // Desenha uma string
                 ssd1306_draw_string(&ssd, "Nivel: ", 10, 31);           // Desenha uma string
                 ssd1306_draw_string(&ssd, water_level_str, 58, 31);         // Desenha uma string
-                ssd1306_draw_string(&ssd, gpio_get(RELE_PIN) ? "Bomba: OFF" : "Bomba: ON", 10,41);
+                ssd1306_draw_string(&ssd, !estado_bomba ? "Bomba: OFF" : "Bomba: ON", 10,41);
                 sprintf(distance_str, "%.2f cm", ultrasonic_distance); // Formata a distância medida
                 ssd1306_draw_string(&ssd, distance_str, 20, 53); // Desenha a distância medida*/
                 ssd1306_send_data(&ssd);                             // Atualiza o display
@@ -378,7 +406,8 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
     hs->sent = 0;
 
     if (strstr(req, "GET /bomba/on")){
-        gpio_put(RELE_PIN, 0); // Ativa o relé (LOW liga a bomba)
+        //gpio_put(RELE_PIN, 0); // Ativa o relé (LOW liga a bomba)
+        estado_bomba = true;
         const char *txt = "Bomba Ligada";
         hs->len = snprintf(hs->response, sizeof(hs->response),
                         "HTTP/1.1 200 OK\r\n"
@@ -390,6 +419,9 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                         (int)strlen(txt), txt);
     }
     else if (strstr(req, "GET /bomba/off")){
+        estado_bomba = false;
+        //envia_sinal = true;
+
         gpio_put(RELE_PIN, 1); // Desativa o relé (HIGH desliga a bomba)
         const char *txt = "Bomba Desligada";
         hs->len = snprintf(hs->response, sizeof(hs->response),
@@ -422,7 +454,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
         float nivel_porcentagem = (((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
         // //
 
-        int estado_bomba_para_json = !gpio_get(RELE_PIN);
+        int estado_bomba_para_json = estado_bomba;
         char json_payload[96]; // Buffer para a string JSON
         int json_len = snprintf(json_payload, sizeof(json_payload),
                                  "{\"bomba_agua\":%d,\"nivel_agua\":%d, \"limite_maximo\":%d,\"limite_minimo\":%d}\r\n",
