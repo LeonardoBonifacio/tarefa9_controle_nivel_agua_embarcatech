@@ -12,7 +12,7 @@
 #include "lib/matrix_leds/matrix_leds.h"
 #include "lib/buzzer/buzzer.h"
 #include "lib/ultrasonic/ultrasonic.h"
-#include "config/wifi_config.h"
+#include "config/wifi_config_example.h"
 #include "public/html_data.h"
 
 #include "FreeRTOS.h"
@@ -31,14 +31,13 @@
 #define ULTRASONIC_DIST_MAX_VAZIO 28.0f // Distância máxima lida (reservatório vazio)
 #define ULTRASONIC_DIST_MIN_CHEIO 15.0f // Distância mínima lida (reservatório cheio)
 
-
-// OBS: Na hora da montagem do reservatório precisamos ver até onde o potênciometro irá girar no nível mínimo  e máximo para ajustar os valores abaixo
-// Definições para o potenciômetro de boia
+// Valores ajustados para o reservatório usado
 #define ADC_MIN_POTENTIOMETER_READING 1990   // Valor mínimo lido do potenciômetro (quando o reservatório está vazio)
 #define ADC_MAX_POTENTIOMETER_READING  2240   // Valor máximo lido do potenciômetro (quando o reservatório está cheio)
 
 // Fila para armazenar os valores de nivel de agua lidos
 QueueHandle_t xQueueWaterLevelReadings;
+//Mutexes para proteger o acesso ao display e as váriaveis de limites
 SemaphoreHandle_t xMutexDisplay;
 SemaphoreHandle_t xMutexLimites;
 SemaphoreHandle_t xWifiReadySemaphore; // Novo semáforo para sinalizar que o Wi-Fi está pronto
@@ -67,7 +66,7 @@ void button_callback(uint gpio, uint32_t events);
 ssd1306_t ssd; // Declaração do display OLED
 volatile static int min_water_level_limit = 20; // Limite mínimo do nível de água (em porcentagem)
 volatile static int max_water_level_limit = 50; // Limite máximo do nível de água (em porcentagem)
-volatile static bool reset_limits=false;
+volatile static bool reset_limits=false; // Alterada pelo botão A
 float ultrasonic_distance = 0.0f; // Variável para armazenar a distância medida pelo sensor ultrassônico
 bool estado_bomba = false; // Variável para armazenar o estado da bomba (ligada/desligada)
 bool envia_sinal = false; // Variável para controlar o envio do sinal de acionamento da bomba
@@ -77,11 +76,11 @@ int main()
     stdio_init_all();
     sleep_ms(2000); // Aguarda a serial se conectar
 
-    button_init_predefined(true, true, true);
+    button_init_predefined(true, true, true); // INicializa os botões com Pull-up
 
-    init_buzzer(BUZZER_A_PIN,4.0f);
+    init_buzzer(BUZZER_A_PIN,4.0f); 
 
-    button_setup_irq(true,true,true,button_callback);
+    button_setup_irq(true,true,true,button_callback);// Inicializa interrupções no 3 botões, setando a função de callback
 
     // Inicializa o display OLED
     init_display(&ssd);
@@ -91,14 +90,14 @@ int main()
     ssd1306_fill(&ssd, false); // Limpa a tela
     ssd1306_send_data(&ssd);   // Envia os dados para o display
 
+    //Criação de fila e mutex
     xQueueWaterLevelReadings = xQueueCreate(5, sizeof(int));
     xMutexDisplay = xSemaphoreCreateMutex();
     xMutexLimites = xSemaphoreCreateMutex();
-    
     xWifiReadySemaphore = xSemaphoreCreateBinary(); // Cria um semáforo binário, inicialmente "não tomado"
 
     xTaskCreate(vWebServerTask, "WebServerTask", configMINIMAL_STACK_SIZE,
-                NULL, tskIDLE_PRIORITY + 2, NULL);
+                NULL, tskIDLE_PRIORITY + 2, NULL); // Prioridade maior para o webserver ser iniciado primeiramente
     xTaskCreate(vControlWaterPumpTask, "AcionaBombaComBaseNoNivelTask", configMINIMAL_STACK_SIZE,
                 NULL, tskIDLE_PRIORITY, NULL);
     xTaskCreate(vDisplayTask, "vMostraDadosNoDisplayTask", configMINIMAL_STACK_SIZE,
@@ -114,6 +113,7 @@ int main()
     panic_unsupported();
 }
 
+// Função de callback para interrupção dos botões
 void button_callback(uint gpio, uint32_t events){
     uint32_t current_time = to_ms_since_boot(get_absolute_time());
 
@@ -142,8 +142,9 @@ void vUltrasonicSensorTask(void *pvParameters){
     xSemaphoreTake(xWifiReadySemaphore, portMAX_DELAY);
     xSemaphoreGive(xWifiReadySemaphore); // Dá o semáforo de volta para que outras tasks também possam usá-lo
     while (true){
-        uint64_t pulse_duration = get_pulse_duration_us(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN);
+        uint64_t pulse_duration = get_pulse_duration_us(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN); // Mede a duração do pulso do ultrassônico
 
+        // Converte a duração do pulso em cm e inches
         if (pulse_duration > 0) {
             float distance_cm = microseconds_to_cm(pulse_duration);
             float distance_inches = microseconds_to_inches(pulse_duration);
@@ -159,7 +160,7 @@ void vUltrasonicSensorTask(void *pvParameters){
         // Quanto MENOR a distância, mais CHEIO o tanque (100%).
         float float_ultrassonic_distance = (float) ultrasonic_distance;
         float range = ULTRASONIC_DIST_MAX_VAZIO - ULTRASONIC_DIST_MIN_CHEIO;
-        float adjusted_distance = ultrasonic_distance - ULTRASONIC_DIST_MIN_CHEIO; // Ajusta a distância para o novo zero (tanque cheio)
+        float adjusted_distance = float_ultrassonic_distance - ULTRASONIC_DIST_MIN_CHEIO; // Ajusta a distância para o novo zero (tanque cheio)
 
         // Calcula a porcentagem.
         // Se a distância for ULTRASONIC_DIST_MIN_CHEIO (cheio), adjusted_distance será 0, e a porcentagem será 100.
@@ -185,26 +186,26 @@ void vReadPotentiometerTask(void *pvParameters){
     adc_gpio_init(ADC_PIN_POTENTIOMETER_READ);
     adc_init();
     int water_level_percentage = 0;
-    uint32_t total, average_adc;
+    uint32_t total, average_adc; // Para tirar a média da leitura do adc no potênciometro
     xSemaphoreTake(xWifiReadySemaphore, portMAX_DELAY);
     xSemaphoreGive(xWifiReadySemaphore); // Dá o semáforo de volta para que outras tasks também possam usá-lo
     while (true){
-        // ja estou armazenando na fila a porcentagem em relação ao valor lido
-        // 0% == 22 lido pelo adc
-        // 100% == 4077
-        adc_select_input(2); // GPIO 26 = ADC0
+        adc_select_input(2); // GPIO 28 = ADC2
         total=0;
+        // Faz 20 leituras
         for (uint8_t i = 0; i < 20; i++)
         {
             uint16_t leitura = adc_read();
             total += leitura;
         }
 
-        average_adc=total/20;
+        average_adc=total/20; // Tira a média
         printf("\nLeitura média do potenciômetro: %d\n", average_adc);
 
+        // Converte em porcentagem baseado nos valores máximos e mínimos lidos pelo potênciometro no reservatório
         water_level_percentage = (((float)(average_adc - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
 
+        // Limita entre 0 e 100
         if (water_level_percentage < 0) water_level_percentage = 0;
         if (water_level_percentage > 100) water_level_percentage = 100;
 
@@ -231,33 +232,30 @@ void vControlWaterPumpTask(void * pvParameters){
         if (xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
             if(xSemaphoreTake(xMutexLimites, portMAX_DELAY) == pdTRUE){
 
-                if (reset_limits)
-                {
+                if (reset_limits){// Caso o botão A seja pressionado, reseta os limites
                     min_water_level_limit = 20; 
                     max_water_level_limit = 50;
                     reset_limits=false;
                 }
 
                 if (water_level_percentage <= min_water_level_limit){
-                    //gpio_put(RELE_PIN,0); // Ativa o rele deixando os 12v passarem para a bomba
                     estado_bomba = true; // Estado da bomba ligado
                 }
                 else if (water_level_percentage >= max_water_level_limit){
-                    //gpio_put(RELE_PIN,0); // Ativa o rele desligando a bomba
                     estado_bomba = false; // Estado da bomba desligado
                 }
                 xSemaphoreGive(xMutexLimites);
             }
         }
 
-        if (estado_bomba && to_ms_since_boot(get_absolute_time()) - last_time_bomba > 20000) {
+        if (estado_bomba && to_ms_since_boot(get_absolute_time()) - last_time_bomba > 20000) {// Liga a bomba se o estado esta true e passou 20s
             gpio_put(RELE_PIN, 0); // Liga a bomba (ativa o relé)
             vTaskDelay(pdMS_TO_TICKS(200));
             gpio_put(RELE_PIN, 1); // Desliga a bomba (desativa o relé)
             last_time_bomba = to_ms_since_boot(get_absolute_time()); // Atualiza o último
             envia_sinal = true;
             printf("Bomba ligada!\n");
-        } else if (!estado_bomba && envia_sinal) {
+        } else if (!estado_bomba && envia_sinal) {// Senão desliga a bomba
             gpio_put(RELE_PIN, 0); // Liga a bomba (ativa o relé)
             vTaskDelay(pdMS_TO_TICKS(200));
             gpio_put(RELE_PIN, 1); // Desliga a bomba (desativa o relé)
@@ -272,15 +270,15 @@ void vControlWaterPumpTask(void * pvParameters){
 
 
 
-        if (estado_bomba && gpio_get(RED_LED_PIN)){
-            set_led_green();
+        if (estado_bomba && gpio_get(RED_LED_PIN)){// Som emitido quando a bomba esta ligada
+            set_led_green(); // Liga o led verde indicando acionamento da bomba
 
             play_tone(BUZZER_A_PIN, 300);
             vTaskDelay(pdMS_TO_TICKS(250)); // Toca o buzzer por 250ms
             stop_tone(BUZZER_A_PIN);
 
-        }else if(!estado_bomba && !gpio_get(RED_LED_PIN)){
-            set_led_yellow();
+        }else if(!estado_bomba && !gpio_get(RED_LED_PIN)){ // Som emitido quando a bomba esta desligada
+            set_led_yellow(); // Liga
             for (uint8_t i = 0; i < 2; i++)
             {
                 play_tone(BUZZER_A_PIN, 900);
@@ -305,21 +303,20 @@ void vDisplayTask(void *pvParameters){
     char max_water_level_str[5];
     char distance_str[10]; // Buffer para armazenar a string da distância
     while (true){
+        // Aguarde recebimento de novo valor de porcentagem
         if (xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
-            
-            if(xSemaphoreTake(xMutexLimites, portMAX_DELAY) == pdTRUE){
+            if(xSemaphoreTake(xMutexLimites, portMAX_DELAY) == pdTRUE){ // Pega os limite com segurança através do mutex
                 min=min_water_level_limit;
                 max=max_water_level_limit;
                 xSemaphoreGive(xMutexLimites);
             }
 
-            if (xSemaphoreTake(xMutexDisplay,portMAX_DELAY) == pdTRUE){
+            if (xSemaphoreTake(xMutexDisplay,portMAX_DELAY) == pdTRUE){// Acessa o display tomando o mutex
                 sprintf(water_level_str, "%d%%", water_level_percentage); // Formata com '%'
                 sprintf(min_water_level_str, "%d%%", min);
                 sprintf(max_water_level_str, "%d%%", max);
                 ssd1306_fill(&ssd, false);                     // Limpa o display
                 ssd1306_rect(&ssd, 3, 3, 122, 60, true, false); // Desenha um retângulo
-                //ssd1306_line(&ssd, 3, 25, 123, 25, true);      // Desenha uma linha
 
                 ssd1306_draw_string(&ssd, "Min: ", 10, 10);           // Desenha uma string
                 ssd1306_draw_string(&ssd, min_water_level_str, 58, 10);         // Desenha uma string
@@ -350,9 +347,9 @@ void vMatrixLedsTask(void *pvParameters){
     int water_level_percentage = 0;
     xSemaphoreTake(xWifiReadySemaphore, portMAX_DELAY);
     xSemaphoreGive(xWifiReadySemaphore); // Dá o semáforo de volta para que outras tasks também possam usá-lo
-    while (true)
-    {
-        if(xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
+    while (true){
+        if(xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){// Aguarda um novo valor de porcentagem
+            // Exibe na matriz a porcentagem correponde, sendo que cada linha representa 20%
             if (water_level_percentage >= 80){
                 desenha_frame(levels,4);
             }else if(water_level_percentage >= 60){
@@ -376,10 +373,9 @@ void vMatrixLedsTask(void *pvParameters){
 void vWebServerTask(void *pvParameters){
     (void)pvParameters; // Evita aviso de parâmetro não utilizado
 
-    if (xSemaphoreTake(xMutexDisplay,portMAX_DELAY) == pdTRUE){
+    if (xSemaphoreTake(xMutexDisplay,portMAX_DELAY) == pdTRUE){// Toma o mutex do display para exibir o ip e informações do wifi 
         // Inicializa a biblioteca CYW43 para Wi-Fi
-        if (cyw43_arch_init())
-        {
+        if (cyw43_arch_init()){
             ssd1306_fill(&ssd, false);
             ssd1306_draw_string(&ssd, "WiFi => FALHA", 0, 0);
             ssd1306_send_data(&ssd);
@@ -387,9 +383,8 @@ void vWebServerTask(void *pvParameters){
             vTaskDelete(NULL);  // Encerrar esta task
         }
 
-        cyw43_arch_enable_sta_mode();
-        if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 30000))
-        {
+        cyw43_arch_enable_sta_mode();// Coloca em modo cliente
+        if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 30000)){ // Tenta se conectar durante 30s
             ssd1306_fill(&ssd, false);
             ssd1306_draw_string(&ssd, "WiFi => ERRO", 0, 0);
             ssd1306_send_data(&ssd);
@@ -397,17 +392,17 @@ void vWebServerTask(void *pvParameters){
             vTaskDelete(NULL);  // Encerrar esta task
         }
 
-        uint8_t *ip = (uint8_t *)&(cyw43_state.netif[0].ip_addr.addr);
+        uint8_t *ip = (uint8_t *)&(cyw43_state.netif[0].ip_addr.addr);//Obtem o ip do dispositivo nesta rede
         char ip_str[24];
         snprintf(ip_str, sizeof(ip_str), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
         printf("IP: %s\n",ip_str);
         ssd1306_fill(&ssd, false);
         ssd1306_draw_string(&ssd, "WiFi => OK", 0, 0);
-        ssd1306_draw_string(&ssd, ip_str, 0, 10);
+        ssd1306_draw_string(&ssd, ip_str, 0, 10);// Mostra o ip na tela para acessar o webserver
         ssd1306_send_data(&ssd);
         start_http_server();
         vTaskDelay(pdMS_TO_TICKS(2000)); // pra dar tempo de ver o ip
-        xSemaphoreGive(xMutexDisplay);
+        xSemaphoreGive(xMutexDisplay); // Libera o display 
         xSemaphoreGive(xWifiReadySemaphore); // Sinaliza que o Wi-Fi está pronto!
     }
 
@@ -434,8 +429,7 @@ static err_t http_sent(void *arg, struct tcp_pcb *tpcb, u16_t len)
 }
 
 // Função de recebimento HTTP
-static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
-{   
+static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err){   
 
     if (!p)
     {
@@ -453,7 +447,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
     }
     hs->sent = 0;
 
-    if (strstr(req, "GET /bomba/on")){
+    if (strstr(req, "GET /bomba/on")){//Requisição para ativar a bomba
         //gpio_put(RELE_PIN, 0); // Ativa o relé (LOW liga a bomba)
         estado_bomba = true;
         const char *txt = "Bomba Ligada";
@@ -466,7 +460,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                         "%s",
                         (int)strlen(txt), txt);
     }
-    else if (strstr(req, "GET /bomba/off")){
+    else if (strstr(req, "GET /bomba/off")){ // Requisição para desativar a bomba
         estado_bomba = false;
         //envia_sinal = true;
 
@@ -481,7 +475,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                         "%s",
                         (int)strlen(txt), txt);
     }
-    else if (strstr(req, "GET /estado")){  // Se a requisição for para obter o estado dos sensores(potenciometro com boia)
+    else if (strstr(req, "GET /estado")){  // Se a requisição for para obter o estado dos sensores(potenciometro com boia ou ultrassônico)
 
         // ULTRASSONICO
         // Converte a distância ultrassônica para porcentagem
@@ -498,7 +492,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
         }
         */
 
-        // //POTENCIOMETRO
+        // //POTENCIOMETRO para nivel de porcentagem
         float nivel_porcentagem = (((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
         // //
 
@@ -518,7 +512,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                            json_len, json_payload);
 
     }
-    else if (strstr(req, "POST /limites")) {
+    else if (strstr(req, "POST /limites")) { // Para mudar os valores do limite no codigo atraves do webserver
         char *body = strstr(req, "\r\n\r\n");
         if(body) {
             body += 4;
@@ -551,7 +545,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                         "%s",
                         (int)strlen(txt), txt);
     }
-    else{
+    else{// So atualiza a página caso nada tenha ocorrido
         hs->len = snprintf(hs->response, sizeof(hs->response),
                            "HTTP/1.1 200 OK\r\n"
                            "Content-Type: text/html\r\n"
