@@ -40,6 +40,7 @@
 // Fila para armazenar os valores de nivel de agua lidos
 QueueHandle_t xQueueWaterLevelReadings;
 SemaphoreHandle_t xMutexDisplay;
+SemaphoreHandle_t xMutexLimites;
 SemaphoreHandle_t xWifiReadySemaphore; // Novo semáforo para sinalizar que o Wi-Fi está pronto
 // Estrutura de dados
 struct http_state
@@ -92,6 +93,7 @@ int main()
 
     xQueueWaterLevelReadings = xQueueCreate(5, sizeof(int));
     xMutexDisplay = xSemaphoreCreateMutex();
+    xMutexLimites = xSemaphoreCreateMutex();
     
     xWifiReadySemaphore = xSemaphoreCreateBinary(); // Cria um semáforo binário, inicialmente "não tomado"
 
@@ -211,13 +213,24 @@ void vControlWaterPumpTask(void * pvParameters){
     uint64_t last_time_bomba = -20000; // Variável para armazenar o último tempo que a bomba foi ligada
     while (true){
         if (xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
-            if (water_level_percentage <= min_water_level_limit){
-                //gpio_put(RELE_PIN,0); // Ativa o rele deixando os 12v passarem para a bomba
-                estado_bomba = true; // Estado da bomba ligado
-            }
-            else if (water_level_percentage >= max_water_level_limit){
-                //gpio_put(RELE_PIN,0); // Ativa o rele desligando a bomba
-                estado_bomba = false; // Estado da bomba desligado
+            if(xSemaphoreTake(xMutexLimites, portMAX_DELAY) == pdTRUE){
+
+                if (reset_limits)
+                {
+                    min_water_level_limit = 20; 
+                    max_water_level_limit = 50;
+                    reset_limits=false;
+                }
+
+                if (water_level_percentage <= min_water_level_limit){
+                    //gpio_put(RELE_PIN,0); // Ativa o rele deixando os 12v passarem para a bomba
+                    estado_bomba = true; // Estado da bomba ligado
+                }
+                else if (water_level_percentage >= max_water_level_limit){
+                    //gpio_put(RELE_PIN,0); // Ativa o rele desligando a bomba
+                    estado_bomba = false; // Estado da bomba desligado
+                }
+                xSemaphoreGive(xMutexLimites);
             }
         }
 
@@ -269,10 +282,19 @@ void vControlWaterPumpTask(void * pvParameters){
 void vDisplayTask(void *pvParameters){
     (void)pvParameters; // Evita aviso de parâmetro não utilizado
     int water_level_percentage = 0;
+    uint8_t min=20;
+    uint8_t max=50;
     char water_level_str[5]; // Buffer para armazenar a string
     char distance_str[10]; // Buffer para armazenar a string da distância
     while (true){
         if (xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
+            
+            if(xSemaphoreTake(xMutexLimites, portMAX_DELAY) == pdTRUE){
+                min=min_water_level_limit;
+                max=max_water_level_limit;
+                xSemaphoreGive(xMutexLimites);
+            }
+
             if (xSemaphoreTake(xMutexDisplay,portMAX_DELAY) == pdTRUE){
                 sprintf(water_level_str, "%d%%", water_level_percentage); // Formata com '%'
                 ssd1306_fill(&ssd, false);                     // Limpa o display
@@ -480,8 +502,11 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
             if(sscanf(body, "{\"max\":%d,\"min\":%d", &max_val, &min_val) == 2) {
                 // Valida os valores recebidos
                 if(max_val >= 0 && max_val <= 100 && min_val >= 0 && min_val <= 100) {
-                    max_water_level_limit = max_val;
-                    min_water_level_limit = min_val;
+                    if(xSemaphoreTake(xMutexLimites, portMAX_DELAY) == pdTRUE){
+                        max_water_level_limit = max_val;
+                        min_water_level_limit = min_val;
+                        xSemaphoreGive(xMutexLimites);
+                    }
                 }
             }
         }
