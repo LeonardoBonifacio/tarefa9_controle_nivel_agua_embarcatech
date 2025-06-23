@@ -185,6 +185,7 @@ void vReadPotentiometerTask(void *pvParameters){
     adc_gpio_init(ADC_PIN_POTENTIOMETER_READ);
     adc_init();
     int water_level_percentage = 0;
+    uint32_t total, average_adc;
     xSemaphoreTake(xWifiReadySemaphore, portMAX_DELAY);
     xSemaphoreGive(xWifiReadySemaphore); // Dá o semáforo de volta para que outras tasks também possam usá-lo
     while (true){
@@ -192,8 +193,23 @@ void vReadPotentiometerTask(void *pvParameters){
         // 0% == 22 lido pelo adc
         // 100% == 4077
         adc_select_input(2); // GPIO 26 = ADC0
-        printf("Leitura do potenciômetro: %d\n", adc_read()); // Lê o valor do potenciômetro
-        water_level_percentage = (((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
+        total=0;
+        for (uint8_t i = 0; i < 20; i++)
+        {
+            uint16_t leitura = adc_read();
+            total += leitura;
+        }
+
+        average_adc=total/20;
+        printf("\nLeitura média do potenciômetro: %d\n", average_adc);
+
+        water_level_percentage = (((float)(average_adc - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
+
+        if (water_level_percentage < 0) water_level_percentage = 0;
+        if (water_level_percentage > 100) water_level_percentage = 100;
+
+         printf("Leitura nível de água: %d%%\n", water_level_percentage);
+        
         xQueueSend(xQueueWaterLevelReadings, &water_level_percentage, 0); // Envia o valor da leitura do potenciometro em porcentagem para fila
         vTaskDelay(pdMS_TO_TICKS(100));              // 10 Hz de leitura
     }
