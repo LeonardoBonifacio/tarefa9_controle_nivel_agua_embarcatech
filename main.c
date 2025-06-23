@@ -78,7 +78,7 @@ int main()
 
     button_init_predefined(true, true, true);
 
-    init_buzzer(BUZZER_A_PIN,125.0f);
+    init_buzzer(BUZZER_A_PIN,4.0f);
 
     button_setup_irq(true,true,true,button_callback);
 
@@ -243,14 +243,14 @@ void vControlWaterPumpTask(void * pvParameters){
 
 
 
-        if (!gpio_get(RELE_PIN) && gpio_get(RED_LED_PIN)){
+        if (estado_bomba && gpio_get(RED_LED_PIN)){
             set_led_green();
 
             play_tone(BUZZER_A_PIN, 300);
             vTaskDelay(pdMS_TO_TICKS(250)); // Toca o buzzer por 250ms
             stop_tone(BUZZER_A_PIN);
 
-        }else if(gpio_get(RELE_PIN) && !gpio_get(RED_LED_PIN)){
+        }else if(!estado_bomba && !gpio_get(RED_LED_PIN)){
             set_led_yellow();
             for (uint8_t i = 0; i < 2; i++)
             {
