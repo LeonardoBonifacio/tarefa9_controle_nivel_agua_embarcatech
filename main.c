@@ -40,6 +40,7 @@
 // Fila para armazenar os valores de nivel de agua lidos
 QueueHandle_t xQueueWaterLevelReadings;
 SemaphoreHandle_t xMutexDisplay;
+SemaphoreHandle_t xMutexLimites;
 SemaphoreHandle_t xWifiReadySemaphore; // Novo semáforo para sinalizar que o Wi-Fi está pronto
 // Estrutura de dados
 struct http_state
@@ -78,7 +79,7 @@ int main()
 
     button_init_predefined(true, true, true);
 
-    init_buzzer(BUZZER_A_PIN,125.0f);
+    init_buzzer(BUZZER_A_PIN,4.0f);
 
     button_setup_irq(true,true,true,button_callback);
 
@@ -92,6 +93,7 @@ int main()
 
     xQueueWaterLevelReadings = xQueueCreate(5, sizeof(int));
     xMutexDisplay = xSemaphoreCreateMutex();
+    xMutexLimites = xSemaphoreCreateMutex();
     
     xWifiReadySemaphore = xSemaphoreCreateBinary(); // Cria um semáforo binário, inicialmente "não tomado"
 
@@ -183,6 +185,7 @@ void vReadPotentiometerTask(void *pvParameters){
     adc_gpio_init(ADC_PIN_POTENTIOMETER_READ);
     adc_init();
     int water_level_percentage = 0;
+    uint32_t total, average_adc;
     xSemaphoreTake(xWifiReadySemaphore, portMAX_DELAY);
     xSemaphoreGive(xWifiReadySemaphore); // Dá o semáforo de volta para que outras tasks também possam usá-lo
     while (true){
@@ -190,8 +193,23 @@ void vReadPotentiometerTask(void *pvParameters){
         // 0% == 22 lido pelo adc
         // 100% == 4077
         adc_select_input(2); // GPIO 26 = ADC0
-        printf("Leitura do potenciômetro: %d\n", adc_read()); // Lê o valor do potenciômetro
-        water_level_percentage = (((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
+        total=0;
+        for (uint8_t i = 0; i < 20; i++)
+        {
+            uint16_t leitura = adc_read();
+            total += leitura;
+        }
+
+        average_adc=total/20;
+        printf("\nLeitura média do potenciômetro: %d\n", average_adc);
+
+        water_level_percentage = (((float)(average_adc - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
+
+        if (water_level_percentage < 0) water_level_percentage = 0;
+        if (water_level_percentage > 100) water_level_percentage = 100;
+
+         printf("Leitura nível de água: %d%%\n", water_level_percentage);
+        
         xQueueSend(xQueueWaterLevelReadings, &water_level_percentage, 0); // Envia o valor da leitura do potenciometro em porcentagem para fila
         vTaskDelay(pdMS_TO_TICKS(100));              // 10 Hz de leitura
     }
@@ -211,13 +229,24 @@ void vControlWaterPumpTask(void * pvParameters){
     uint64_t last_time_bomba = -20000; // Variável para armazenar o último tempo que a bomba foi ligada
     while (true){
         if (xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
-            if (water_level_percentage <= min_water_level_limit){
-                //gpio_put(RELE_PIN,0); // Ativa o rele deixando os 12v passarem para a bomba
-                estado_bomba = true; // Estado da bomba ligado
-            }
-            else if (water_level_percentage >= max_water_level_limit){
-                //gpio_put(RELE_PIN,0); // Ativa o rele desligando a bomba
-                estado_bomba = false; // Estado da bomba desligado
+            if(xSemaphoreTake(xMutexLimites, portMAX_DELAY) == pdTRUE){
+
+                if (reset_limits)
+                {
+                    min_water_level_limit = 20; 
+                    max_water_level_limit = 50;
+                    reset_limits=false;
+                }
+
+                if (water_level_percentage <= min_water_level_limit){
+                    //gpio_put(RELE_PIN,0); // Ativa o rele deixando os 12v passarem para a bomba
+                    estado_bomba = true; // Estado da bomba ligado
+                }
+                else if (water_level_percentage >= max_water_level_limit){
+                    //gpio_put(RELE_PIN,0); // Ativa o rele desligando a bomba
+                    estado_bomba = false; // Estado da bomba desligado
+                }
+                xSemaphoreGive(xMutexLimites);
             }
         }
 
@@ -243,14 +272,14 @@ void vControlWaterPumpTask(void * pvParameters){
 
 
 
-        if (!gpio_get(RELE_PIN) && gpio_get(RED_LED_PIN)){
+        if (estado_bomba && gpio_get(RED_LED_PIN)){
             set_led_green();
 
             play_tone(BUZZER_A_PIN, 300);
             vTaskDelay(pdMS_TO_TICKS(250)); // Toca o buzzer por 250ms
             stop_tone(BUZZER_A_PIN);
 
-        }else if(gpio_get(RELE_PIN) && !gpio_get(RED_LED_PIN)){
+        }else if(!estado_bomba && !gpio_get(RED_LED_PIN)){
             set_led_yellow();
             for (uint8_t i = 0; i < 2; i++)
             {
@@ -269,23 +298,42 @@ void vControlWaterPumpTask(void * pvParameters){
 void vDisplayTask(void *pvParameters){
     (void)pvParameters; // Evita aviso de parâmetro não utilizado
     int water_level_percentage = 0;
+    uint8_t min=20;
+    uint8_t max=50;
     char water_level_str[5]; // Buffer para armazenar a string
+    char min_water_level_str[5];
+    char max_water_level_str[5];
     char distance_str[10]; // Buffer para armazenar a string da distância
     while (true){
         if (xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
+            
+            if(xSemaphoreTake(xMutexLimites, portMAX_DELAY) == pdTRUE){
+                min=min_water_level_limit;
+                max=max_water_level_limit;
+                xSemaphoreGive(xMutexLimites);
+            }
+
             if (xSemaphoreTake(xMutexDisplay,portMAX_DELAY) == pdTRUE){
                 sprintf(water_level_str, "%d%%", water_level_percentage); // Formata com '%'
+                sprintf(min_water_level_str, "%d%%", min);
+                sprintf(max_water_level_str, "%d%%", max);
                 ssd1306_fill(&ssd, false);                     // Limpa o display
                 ssd1306_rect(&ssd, 3, 3, 122, 60, true, false); // Desenha um retângulo
-                ssd1306_line(&ssd, 3, 25, 123, 25, true);      // Desenha uma linha
+                //ssd1306_line(&ssd, 3, 25, 123, 25, true);      // Desenha uma linha
 
-                ssd1306_draw_string(&ssd, "MEDIDOR NIVEL", 8, 6); // Desenha uma string
-                ssd1306_draw_string(&ssd, " DE AGUA", 20, 16);  // Desenha uma string
-                ssd1306_draw_string(&ssd, "Nivel: ", 10, 31);           // Desenha uma string
-                ssd1306_draw_string(&ssd, water_level_str, 58, 31);         // Desenha uma string
-                ssd1306_draw_string(&ssd, !estado_bomba ? "Bomba: OFF" : "Bomba: ON", 10,41);
-                sprintf(distance_str, "%.2f cm", ultrasonic_distance); // Formata a distância medida
-                ssd1306_draw_string(&ssd, distance_str, 20, 53); // Desenha a distância medida*/
+                ssd1306_draw_string(&ssd, "Min: ", 10, 10);           // Desenha uma string
+                ssd1306_draw_string(&ssd, min_water_level_str, 58, 10);         // Desenha uma string
+                ssd1306_draw_string(&ssd, "Max: ", 10, 20);           // Desenha uma string
+                ssd1306_draw_string(&ssd, max_water_level_str, 58, 20);         // Desenha uma string
+
+                ssd1306_draw_string(&ssd, "Nivel: ", 10, 30);           // Desenha uma string
+                ssd1306_draw_string(&ssd, water_level_str, 58, 30);         // Desenha uma string
+                ssd1306_draw_string(&ssd, !estado_bomba ? "Bomba:OFF" : "Bomba:ON", 10,40);
+
+                ssd1306_draw_string(&ssd, (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) <= 0) ? "Wi-Fi:OFF" : "Wi-Fi:ON", 10,50);
+
+                //sprintf(distance_str, "%.2f cm", ultrasonic_distance); // Formata a distância medida
+                //ssd1306_draw_string(&ssd, distance_str, 20, 53); // Desenha a distância medida*/
                 ssd1306_send_data(&ssd);                             // Atualiza o display
                 xSemaphoreGive(xMutexDisplay);
             }
@@ -480,8 +528,11 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
             if(sscanf(body, "{\"max\":%d,\"min\":%d", &max_val, &min_val) == 2) {
                 // Valida os valores recebidos
                 if(max_val >= 0 && max_val <= 100 && min_val >= 0 && min_val <= 100) {
-                    max_water_level_limit = max_val;
-                    min_water_level_limit = min_val;
+                    if(xSemaphoreTake(xMutexLimites, portMAX_DELAY) == pdTRUE){
+                        max_water_level_limit = max_val;
+                        min_water_level_limit = min_val;
+                        xSemaphoreGive(xMutexLimites);
+                    }
                 }
             }
         }
