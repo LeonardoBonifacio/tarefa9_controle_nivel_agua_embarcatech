@@ -41,6 +41,7 @@ QueueHandle_t xQueueWaterLevelReadings;
 SemaphoreHandle_t xMutexDisplay;
 SemaphoreHandle_t xMutexLimites;
 SemaphoreHandle_t xWifiReadySemaphore; // Novo semáforo para sinalizar que o Wi-Fi está pronto
+SemaphoreHandle_t xMutexWaterLevelJson; // Mutex para gerir a porcentagem da bomba para a interface web
 // Estrutura de dados
 struct http_state
 {
@@ -68,6 +69,7 @@ volatile static int min_water_level_limit = 20; // Limite mínimo do nível de �
 volatile static int max_water_level_limit = 50; // Limite máximo do nível de água (em porcentagem)
 volatile static bool reset_limits=false; // Alterada pelo botão A
 float ultrasonic_distance = 0.0f; // Variável para armazenar a distância medida pelo sensor ultrassônico
+int water_level_percentege_json; // Variavel global para armazenar a porcentagem de água para interface web
 bool estado_bomba = false; // Variável para armazenar o estado da bomba (ligada/desligada)
 bool envia_sinal = false; // Variável para controlar o envio do sinal de acionamento da bomba
 
@@ -94,7 +96,10 @@ int main()
     xQueueWaterLevelReadings = xQueueCreate(5, sizeof(int));
     xMutexDisplay = xSemaphoreCreateMutex();
     xMutexLimites = xSemaphoreCreateMutex();
+
     xWifiReadySemaphore = xSemaphoreCreateBinary(); // Cria um semáforo binário, inicialmente "não tomado"
+
+    xMutexWaterLevelJson = xSemaphoreCreateMutex();
 
     xTaskCreate(vWebServerTask, "WebServerTask", configMINIMAL_STACK_SIZE,
                 NULL, tskIDLE_PRIORITY + 2, NULL); // Prioridade maior para o webserver ser iniciado primeiramente
@@ -174,6 +179,11 @@ void vUltrasonicSensorTask(void *pvParameters){
             water_level_percentage = 100;
         }
 
+        if(xSemaphoreTake(xMutexWaterLevelJson, portMAX_DELAY)) {
+            water_level_percentege_json= water_level_percentage;
+            xSemaphoreGive(xMutexWaterLevelJson);
+        }
+
         xQueueSend(xQueueWaterLevelReadings, &water_level_percentage, 0); // Envia o valor da porcentagem para a fila
         vTaskDelay(pdMS_TO_TICKS(250)); // Aguarda 500ms para a próxima leitura (ajustável)
     }
@@ -210,6 +220,11 @@ void vReadPotentiometerTask(void *pvParameters){
         if (water_level_percentage > 100) water_level_percentage = 100;
 
          printf("Leitura nível de água: %d%%\n", water_level_percentage);
+
+        if(xSemaphoreTake(xMutexWaterLevelJson, portMAX_DELAY)) {
+            water_level_percentege_json= water_level_percentage;
+            xSemaphoreGive(xMutexWaterLevelJson);
+        }
         
         xQueueSend(xQueueWaterLevelReadings, &water_level_percentage, 0); // Envia o valor da leitura do potenciometro em porcentagem para fila
         vTaskDelay(pdMS_TO_TICKS(100));              // 10 Hz de leitura
@@ -447,9 +462,9 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
     }
     hs->sent = 0;
 
-    if (strstr(req, "GET /bomba/on")){//Requisição para ativar a bomba
-        //gpio_put(RELE_PIN, 0); // Ativa o relé (LOW liga a bomba)
-        estado_bomba = true;
+    if (strstr(req, "GET /bomba/on")){
+        estado_bomba = true;// Coloca o estado da bomba como verdadeira(Ligada)
+
         const char *txt = "Bomba Ligada";
         hs->len = snprintf(hs->response, sizeof(hs->response),
                         "HTTP/1.1 200 OK\r\n"
@@ -460,11 +475,9 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                         "%s",
                         (int)strlen(txt), txt);
     }
-    else if (strstr(req, "GET /bomba/off")){ // Requisição para desativar a bomba
-        estado_bomba = false;
-        //envia_sinal = true;
+    else if (strstr(req, "GET /bomba/off")){
+        estado_bomba = false; // Coloca o estado da bomba como false(Desligada)
 
-        gpio_put(RELE_PIN, 1); // Desativa o relé (HIGH desliga a bomba)
         const char *txt = "Bomba Desligada";
         hs->len = snprintf(hs->response, sizeof(hs->response),
                         "HTTP/1.1 200 OK\r\n"
@@ -475,33 +488,27 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                         "%s",
                         (int)strlen(txt), txt);
     }
-    else if (strstr(req, "GET /estado")){  // Se a requisição for para obter o estado dos sensores(potenciometro com boia ou ultrassônico)
+    else if (strstr(req, "GET /estado")){  // Se a requisição for para obter o estado dos sensores(potenciometro com boia)
 
-        // ULTRASSONICO
-        // Converte a distância ultrassônica para porcentagem
-        /*
-        float range = ULTRASONIC_DIST_MAX_VAZIO - ULTRASONIC_DIST_MIN_CHEIO;
-        float adjusted_distance = ultrasonic_distance - ULTRASONIC_DIST_MIN_CHEIO;
-        float nivel_porcentagem = (((range - adjusted_distance) / range) * 100.0f);
-
-        // Garante que a porcentagem esteja entre 0 e 100 para o HTTP
-        if (nivel_porcentagem < 0.0f) {
-            nivel_porcentagem = 0.0f;
-        } else if (nivel_porcentagem > 100.0f) {
-            nivel_porcentagem = 100.0f;
+        int nivel_agua;
+        if(xSemaphoreTake(xMutexWaterLevelJson, portMAX_DELAY)) {
+            nivel_agua =  water_level_percentege_json;
+            xSemaphoreGive(xMutexWaterLevelJson);
         }
-        */
 
-        // //POTENCIOMETRO para nivel de porcentagem
-        float nivel_porcentagem = (((float)(adc_read() - ADC_MIN_POTENTIOMETER_READING) / (ADC_MAX_POTENTIOMETER_READING - ADC_MIN_POTENTIOMETER_READING)) * 100.0f);
-        // //
+        int min_limit, max_limit;
+        if(xSemaphoreTake(xMutexLimites, portMAX_DELAY)){  
+            min_limit = min_water_level_limit;
+            max_limit = max_water_level_limit;
+            xSemaphoreGive(xMutexLimites);
+        }
 
         int estado_bomba_para_json = estado_bomba;
         char json_payload[96]; // Buffer para a string JSON
         int json_len = snprintf(json_payload, sizeof(json_payload),
                                  "{\"bomba_agua\":%d,\"nivel_agua\":%d, \"limite_maximo\":%d,\"limite_minimo\":%d}\r\n",
-                                 estado_bomba_para_json, (int)nivel_porcentagem, 
-                                 max_water_level_limit, min_water_level_limit); // Enviando como 'nivel_agua', estado'bomba_agua', limite 'max' e 'min'
+                                 estado_bomba_para_json, nivel_agua, 
+                                 max_water_level_limit, min_limit); // Enviando como 'nivel_agua', estado'bomba_agua', limite 'max' e 'min'
          hs->len = snprintf(hs->response, sizeof(hs->response),
                            "HTTP/1.1 200 OK\r\n"
                            "Content-Type: application/json\r\n"
@@ -525,15 +532,14 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                     if(xSemaphoreTake(xMutexLimites, portMAX_DELAY) == pdTRUE){
                         max_water_level_limit = max_val;
                         min_water_level_limit = min_val;
+                        printf("Novos limites: Max=%d, Min=%d\n", 
+                                max_water_level_limit, 
+                                min_water_level_limit); 
                         xSemaphoreGive(xMutexLimites);
                     }
                 }
             }
         }
-        
-        printf("Novos limites: Max=%d, Min=%d\n", 
-            max_water_level_limit, 
-            min_water_level_limit); 
         
         // Confirma atualização
         const char *txt = "Limites atualizados";
