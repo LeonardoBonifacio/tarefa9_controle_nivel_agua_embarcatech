@@ -539,15 +539,14 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                     if(xSemaphoreTake(xMutexLimites, portMAX_DELAY) == pdTRUE){
                         max_water_level_limit = max_val;
                         min_water_level_limit = min_val;
+                        printf("Novos limites: Max=%d, Min=%d\n", 
+                                max_water_level_limit, 
+                                min_water_level_limit); 
                         xSemaphoreGive(xMutexLimites);
                     }
                 }
             }
         }
-        
-        printf("Novos limites: Max=%d, Min=%d\n", 
-            max_water_level_limit, 
-            min_water_level_limit); 
         
         // Confirma atualização
         const char *txt = "Limites atualizados";
