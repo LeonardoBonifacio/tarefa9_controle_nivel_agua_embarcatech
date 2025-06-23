@@ -301,6 +301,8 @@ void vDisplayTask(void *pvParameters){
     uint8_t min=20;
     uint8_t max=50;
     char water_level_str[5]; // Buffer para armazenar a string
+    char min_water_level_str[5];
+    char max_water_level_str[5];
     char distance_str[10]; // Buffer para armazenar a string da distância
     while (true){
         if (xQueueReceive(xQueueWaterLevelReadings, &water_level_percentage, portMAX_DELAY) == pdTRUE){
@@ -313,17 +315,25 @@ void vDisplayTask(void *pvParameters){
 
             if (xSemaphoreTake(xMutexDisplay,portMAX_DELAY) == pdTRUE){
                 sprintf(water_level_str, "%d%%", water_level_percentage); // Formata com '%'
+                sprintf(min_water_level_str, "%d%%", min);
+                sprintf(max_water_level_str, "%d%%", max);
                 ssd1306_fill(&ssd, false);                     // Limpa o display
                 ssd1306_rect(&ssd, 3, 3, 122, 60, true, false); // Desenha um retângulo
-                ssd1306_line(&ssd, 3, 25, 123, 25, true);      // Desenha uma linha
+                //ssd1306_line(&ssd, 3, 25, 123, 25, true);      // Desenha uma linha
 
-                ssd1306_draw_string(&ssd, "MEDIDOR NIVEL", 8, 6); // Desenha uma string
-                ssd1306_draw_string(&ssd, " DE AGUA", 20, 16);  // Desenha uma string
-                ssd1306_draw_string(&ssd, "Nivel: ", 10, 31);           // Desenha uma string
-                ssd1306_draw_string(&ssd, water_level_str, 58, 31);         // Desenha uma string
-                ssd1306_draw_string(&ssd, !estado_bomba ? "Bomba: OFF" : "Bomba: ON", 10,41);
-                sprintf(distance_str, "%.2f cm", ultrasonic_distance); // Formata a distância medida
-                ssd1306_draw_string(&ssd, distance_str, 20, 53); // Desenha a distância medida*/
+                ssd1306_draw_string(&ssd, "Min: ", 10, 10);           // Desenha uma string
+                ssd1306_draw_string(&ssd, min_water_level_str, 58, 10);         // Desenha uma string
+                ssd1306_draw_string(&ssd, "Max: ", 10, 20);           // Desenha uma string
+                ssd1306_draw_string(&ssd, max_water_level_str, 58, 20);         // Desenha uma string
+
+                ssd1306_draw_string(&ssd, "Nivel: ", 10, 30);           // Desenha uma string
+                ssd1306_draw_string(&ssd, water_level_str, 58, 30);         // Desenha uma string
+                ssd1306_draw_string(&ssd, !estado_bomba ? "Bomba:OFF" : "Bomba:ON", 10,40);
+
+                ssd1306_draw_string(&ssd, (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) <= 0) ? "Wi-Fi:OFF" : "Wi-Fi:ON", 10,50);
+
+                //sprintf(distance_str, "%.2f cm", ultrasonic_distance); // Formata a distância medida
+                //ssd1306_draw_string(&ssd, distance_str, 20, 53); // Desenha a distância medida*/
                 ssd1306_send_data(&ssd);                             // Atualiza o display
                 xSemaphoreGive(xMutexDisplay);
             }
