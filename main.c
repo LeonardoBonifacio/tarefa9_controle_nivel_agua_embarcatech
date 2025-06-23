@@ -468,8 +468,8 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
     hs->sent = 0;
 
     if (strstr(req, "GET /bomba/on")){
-        //gpio_put(RELE_PIN, 0); // Ativa o relé (LOW liga a bomba)
-        estado_bomba = true;
+        estado_bomba = true;// Coloca o estado da bomba como verdadeira(Ligada)
+
         const char *txt = "Bomba Ligada";
         hs->len = snprintf(hs->response, sizeof(hs->response),
                         "HTTP/1.1 200 OK\r\n"
@@ -481,10 +481,8 @@ static err_t http_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t er
                         (int)strlen(txt), txt);
     }
     else if (strstr(req, "GET /bomba/off")){
-        estado_bomba = false;
-        //envia_sinal = true;
+        estado_bomba = false; // Coloca o estado da bomba como false(Desligada)
 
-        gpio_put(RELE_PIN, 1); // Desativa o relé (HIGH desliga a bomba)
         const char *txt = "Bomba Desligada";
         hs->len = snprintf(hs->response, sizeof(hs->response),
                         "HTTP/1.1 200 OK\r\n"
