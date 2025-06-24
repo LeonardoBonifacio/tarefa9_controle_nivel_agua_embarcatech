@@ -118,8 +118,7 @@ Membros da equipe de desenvolvimento do projeto:
         <p>Embedded Systems Developer</p>
       </a>
     </td>
-
-   <td align="center">
+    <td align="center">
       <a href="https://github.com/yuriccosta">
         <img src="https://github.com/yuriccosta.png" width="100px;" alt="Foto do Yuri Costa no GitHub"/><br>
         <b>Yuri Costa</b>
@@ -127,6 +126,21 @@ Membros da equipe de desenvolvimento do projeto:
       </a>
     </td>
 
+  <td align="center">
+      <a href="https://github.com/JotaPablo">
+        <img src="https://github.com/JotaPablo.png" width="100px;" alt="Foto do Juan Pablo no GitHub"/><br>
+        <b>Juan Pablo</b>
+        <p>Embedded Systems Developer</p>
+      </a>
+    </td>
+
+  <td align="center">
+      <a href="https://github.com/Arthuros0">
+        <img src="https://github.com/Arthuros0.png" width="100px;" alt="Foto do Yuri Costa no GitHub"/><br>
+        <b>Arthur de Oliveira</b>
+        <p>Embedded Systems Developer</p>
+      </a>
+    </td>
   </tr>
 </table>
 

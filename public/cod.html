@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Controle de Nível</title>
+
+    <!-- Ícones (Font Awesome) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Estilos CSS -->
+    <style>
+        /* Reset e configurações globais */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        body {
+            background: #1a2a6c;
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 12px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            font-size: 1.6rem;
+            margin-bottom: 3px;
+            color: #64ffda;
+        }
+
+        .subtitle {
+            color: #a0aec0;
+            font-size: 0.85rem;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1.1fr 1fr;
+            gap: 10px;
+        }
+
+        @media(max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .water-tank-container,
+        .pump-container {
+            background: rgba(30, 41, 59, 0.7);
+            border-radius: 8px;
+            padding: 10px;
+        }
+
+        .panel-title {
+            font-size: 1rem;
+            margin-bottom: 6px;
+            color: #64ffda;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        /* Caixa do tanque */
+        .water-tank {
+            position: relative;
+            width: 100%;
+            height: 250px;
+            background: rgba(15, 23, 42, 0.8);
+            border: 2px solid #2c5282;
+            border-radius: 5px;
+            margin: 8px 0;
+            overflow: hidden;
+        }
+
+        @media(max-width: 768px) {
+            .water-tank {
+                height: 200px;
+            }
+        }
+
+        .water-level {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            background: linear-gradient(to top, #1e90ff, #00bfff);
+        }
+
+        .water-percentage {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.8rem;
+            font-weight: bold;
+        }
+
+        /* Linhas de limite */
+        .limit-line {
+            position: absolute;
+            width: 100%;
+            height: 2px;
+            left: 0;
+        }
+
+        .max-limit {
+            background: #ff6b6b;
+        }
+
+        .min-limit {
+            background: #4ade80;
+        }
+
+        /* Legenda */
+        .legend {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 6px;
+            font-size: 0.75rem;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .legend-color {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+        }
+
+        .legend-max {
+            background: #ff6b6b;
+        }
+
+        .legend-min {
+            background: #4ade80;
+        }
+
+        /* Status da bomba */
+        .pump-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 8px;
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 6px;
+            margin: 8px 0;
+        }
+
+        .status-indicator {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #4ade80;
+        }
+
+        .status-indicator.off {
+            background: #ff6b6b;
+        }
+
+        .status-text {
+            font-size: 0.9rem;
+            font-weight: bold;
+        }
+
+        .btn-toggle {
+            width: 100%;
+            background: #38b2ac;
+            color: white;
+            border: none;
+            padding: 8px;
+            font-size: 0.9rem;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .btn-toggle.off {
+            background: #e53e3e;
+        }
+
+        /* Sliders */
+        .slider-container {
+            position: relative;
+            margin-top: 18px;
+        }
+
+        input[type='range'] {
+            width: 100%;
+            height: 5px;
+            background: #2d3748;
+            border-radius: 2px;
+        }
+
+        input[type='range']::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #4299e1;
+            cursor: pointer;
+        }
+
+        .slider-value {
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(15, 23, 42, 0.9);
+            color: white;
+            padding: 2px 5px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            min-width: 32px;
+            text-align: center;
+        }
+
+        .max-value-display {
+            color: #ff6b6b;
+            font-weight: bold;
+        }
+
+        .min-value-display {
+            color: #4ade80;
+            font-weight: bold;
+        }
+
+        .last-update {
+            font-size: 0.65rem;
+            color: #a0aec0;
+            text-align: right;
+            padding: 6px 5px 0;
+            margin-top: 8px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .limits-panel {
+            margin-top: 10px;
+        }
+
+        .limits-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Painel de Controle de Nível de Água</h1>
+            <p class="subtitle">Monitoramento e Controle em Tempo Real</p>
+        </header>
+
+        <div class="dashboard">
+            <!-- Tanque -->
+            <div class="water-tank-container">
+                <div class="panel-title">
+                    <i class="fas fa-chart-bar"></i>
+                    <h2>Nível de Água</h2>
+                </div>
+                <div class="water-tank">
+                    <div class="water-level" id="waterLevel"></div>
+                    <div class="limit-line max-limit" id="maxLimit"></div>
+                    <div class="limit-line min-limit" id="minLimit"></div>
+                    <div class="water-percentage" id="waterPercentage">50%</div>
+                </div>
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-color legend-max"></div>
+                        <span>Máximo</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color legend-min"></div>
+                        <span>Mínimo</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Controle da Bomba -->
+            <div class="pump-container">
+                <div class="panel-title">
+                    <i class="fas fa-water"></i>
+                    <h2>Bomba de Água</h2>
+                </div>
+                <div class="pump-status">
+                    <div class="status-indicator" id="pumpIndicator"></div>
+                    <div class="status-text">Estado: <span id="pumpStatus">Ligada</span></div>
+                </div>
+                <button class="btn-toggle" id="toggleBtn">
+                    <i class="fas fa-power-off"></i>
+                    <span id="btnText">Desligar Bomba</span>
+                </button>
+
+                <!-- Limites -->
+                <div class="limits-panel">
+                    <div class="panel-title">
+                        <i class="fas fa-sliders-h"></i>
+                        <h2>Limites</h2>
+                    </div>
+                    <div class="limits-container">
+                        <div class="slider-container">
+                            <input type="range" id="maxControl" min="0" max="100" value="80">
+                            <div class="slider-value max-value-display" id="maxValue">80%</div>
+                        </div>
+                        <div class="slider-container">
+                            <input type="range" id="minControl" min="0" max="100" value="20">
+                            <div class="slider-value min-value-display" id="minValue">20%</div>
+                        </div>
+                        <p style="color: #a0aec0; font-size: 0.75rem; text-align: center; margin-top: 8px;">
+                            Solte o controle para confirmar
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="last-update" id="timestamp"></div>
+    </div>
+
+    <!-- Script JavaScript -->
+    <script>
+        // Estado atual do sistema
+        const state = { 
+            waterLevel: 0,       // Nível atual de água (%)
+            maxLimit: 90,        // Limite máximo (%)
+            minLimit: 10,        // Limite mínimo (%)
+            pumpStatus: 0        // Status da bomba: 0 = desligada, 1 = ligada
+        };
+
+        let localChange = false;   // Se houve alteração local nos sliders
+        let lastSentMax = 80;      // Último limite máximo enviado
+        let lastSentMin = 20;      // Último limite mínimo enviado
+        let isDragging = false;    // Se o slider está sendo arrastado
+
+        // Função para ligar ou desligar a bomba
+        function controlarBomba(status) {
+            // Impede ligar se estiver acima do máximo ou desligar se estiver abaixo do mínimo
+            if ((state.waterLevel < state.minLimit && !status) ||
+                (state.waterLevel > state.maxLimit && status)) return;
+            
+            const cmd = status ? 'on' : 'off';
+            fetch(`/bomba/${cmd}`).then(r => {
+                if (r.ok) {
+                    state.pumpStatus = status;
+                    updatePumpStatus();
+                    updateToggleButton();
+                    updateTimestamp();
+                }
+            }).catch(e => console.error('Erro:', e));
+        }
+
+        // Envia os limites atualizados para o servidor
+        function atualizarLimites() {
+            if (state.maxLimit === lastSentMax && state.minLimit === lastSentMin) return;
+
+            fetch('/limites', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    max: parseInt(state.maxLimit),
+                    min: parseInt(state.minLimit)
+                })
+            }).then(r => {
+                if (r.ok) {
+                    lastSentMax = state.maxLimit;
+                    lastSentMin = state.minLimit;
+                }
+            }).catch(e => console.error('Erro:', e));
+        }
+
+        // Busca o estado atual do sistema no servidor
+        async function atualizarDados() {
+            try {
+                const r = await fetch('/estado');
+                const d = await r.json();
+
+                state.waterLevel = d.nivel_agua;
+                state.pumpStatus = d.bomba_agua;
+
+                if (!localChange && !isDragging) {
+                    // Atualiza limite máximo se vier diferente do servidor
+                    if (d.limite_maximo !== undefined && d.limite_maximo !== state.maxLimit) {
+                        state.maxLimit = d.limite_maximo;
+                        document.getElementById('maxControl').value = state.maxLimit;
+                        document.getElementById('maxValue').textContent = state.maxLimit + '%';
+                        lastSentMax = state.maxLimit;
+                    }
+                    // Atualiza limite mínimo se vier diferente
+                    if (d.limite_minimo !== undefined && d.limite_minimo !== state.minLimit) {
+                        state.minLimit = d.limite_minimo;
+                        document.getElementById('minControl').value = state.minLimit;
+                        document.getElementById('minValue').textContent = state.minLimit + '%';
+                        lastSentMin = state.minLimit;
+                    }
+                }
+
+                updateWaterTank();
+                updatePumpStatus();
+                updateToggleButton();
+                updateLimitLines();
+                updateTimestamp();
+
+                localChange = false;
+            } catch (e) {
+                console.error('Erro:', e);
+            }
+        }
+
+        // Atualiza o nível de água visualmente
+        function updateWaterTank() {
+            const w = document.getElementById('waterLevel');
+            const p = document.getElementById('waterPercentage');
+            w.style.height = state.waterLevel + '%';
+            p.textContent = state.waterLevel + '%';
+        }
+
+        // Atualiza as linhas dos limites (mínimo e máximo) no tanque
+        function updateLimitLines() {
+            document.getElementById('maxLimit').style.bottom = state.maxLimit + '%';
+            document.getElementById('minLimit').style.bottom = state.minLimit + '%';
+        }
+
+        // Atualiza visualmente o status da bomba (Ligada/Desligada)
+        function updatePumpStatus() {
+            const i = document.getElementById('pumpIndicator');
+            const t = document.getElementById('pumpStatus');
+            if (state.pumpStatus) {
+                i.className = 'status-indicator';
+                t.textContent = 'Ligada';
+                t.style.color = '#4ade80';
+            } else {
+                i.className = 'status-indicator off';
+                t.textContent = 'Desligada';
+                t.style.color = '#ff6b6b';
+            }
+        }
+
+        // Atualiza o texto e cor do botão de controle da bomba
+        function updateToggleButton() {
+            const b = document.getElementById('toggleBtn');
+            const t = document.getElementById('btnText');
+            if (state.pumpStatus) {
+                t.textContent = 'Desligar Bomba';
+                b.className = 'btn-toggle';
+            } else {
+                t.textContent = 'Ligar Bomba';
+                b.className = 'btn-toggle off';
+            }
+        }
+
+        // Atualiza o carimbo de horário da última atualização
+        function updateTimestamp() {
+            document.getElementById('timestamp').textContent =
+                'Atualizado: ' + new Date().toLocaleTimeString();
+        }
+
+        // Garante que o limite mínimo nunca ultrapasse o máximo e vice-versa
+        function validateLimits() {
+            const c = event.target.id;
+            if (c === 'minControl' && parseInt(state.minLimit) > parseInt(state.maxLimit)) {
+                state.minLimit = state.maxLimit;
+                document.getElementById('minControl').value = state.minLimit;
+                document.getElementById('minValue').textContent = state.minLimit + '%';
+            } else if (c === 'maxControl' && parseInt(state.maxLimit) < parseInt(state.minLimit)) {
+                state.maxLimit = state.minLimit;
+                document.getElementById('maxControl').value = state.maxLimit;
+                document.getElementById('maxValue').textContent = state.maxLimit + '%';
+            }
+        }
+
+        // Eventos para sliders de limite máximo
+        document.getElementById('maxControl').addEventListener('input', e => {
+            localChange = true;
+            state.maxLimit = e.target.value;
+            document.getElementById('maxValue').textContent = state.maxLimit + '%';
+            validateLimits();
+            updateLimitLines();
+        });
+        document.getElementById('maxControl').addEventListener('change', atualizarLimites);
+
+        // Eventos para sliders de limite mínimo
+        document.getElementById('minControl').addEventListener('input', e => {
+            localChange = true;
+            state.minLimit = e.target.value;
+            document.getElementById('minValue').textContent = state.minLimit + '%';
+            validateLimits();
+            updateLimitLines();
+        });
+        document.getElementById('minControl').addEventListener('change', atualizarLimites);
+
+        // Evento para botão liga/desliga da bomba
+        document.getElementById('toggleBtn').addEventListener('click', () => {
+            controlarBomba(!state.pumpStatus);
+        });
+
+        // Detecta início e fim do arraste nos sliders
+        document.getElementById('maxControl').addEventListener('mousedown', () => isDragging = true);
+        document.getElementById('minControl').addEventListener('mousedown', () => isDragging = true);
+        document.addEventListener('mouseup', () => isDragging = false);
+
+        // Inicializa a interface
+        function initUI() {
+            document.getElementById('maxControl').value = state.maxLimit;
+            document.getElementById('minControl').value = state.minLimit;
+            document.getElementById('maxValue').textContent = state.maxLimit + '%';
+            document.getElementById('minValue').textContent = state.minLimit + '%';
+
+            updateWaterTank();
+            updatePumpStatus();
+            updateLimitLines();
+            updateToggleButton();
+            updateTimestamp();
+
+            // Atualiza os dados do servidor a cada segundo
+            setInterval(atualizarDados, 1000);
+        }
+
+        // Executa initUI quando a página estiver carregada
+        document.addEventListener('DOMContentLoaded', initUI);
+    </script>
+</body>
+</html>
